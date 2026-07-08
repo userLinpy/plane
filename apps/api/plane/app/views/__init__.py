@@ -90,6 +90,7 @@ from .view.base import (
     IssueViewViewSet,
     IssueViewFavoriteViewSet,
 )
+from .view.publish import IssueViewPublishEndpoint
 from .cycle.base import (
     CycleViewSet,
     CycleDateCheckEndpoint,
