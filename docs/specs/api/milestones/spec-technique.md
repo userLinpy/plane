@@ -3,9 +3,9 @@
 | Champ      | Valeur              |
 |------------|----------------------|
 | Module     | api/milestones      |
-| Version    | 0.1.0               |
+| Version    | 0.1.1               |
 | Date       | 2026-07-12          |
-| Statut     | IMPLÉMENTÉ v0.1.0 (2026-07-12) |
+| Statut     | IMPLÉMENTÉ v0.1.1 (2026-07-12) |
 
 ---
 
@@ -46,8 +46,8 @@ Double couche backend sur modèles greenfield (calque cycles) : `plane/api` (v1 
 
 ## Tests
 
-- `plane/tests/contract/api/test_milestones_v1.py` (11) : title dans la réponse (PAS name), title requis, enveloppe cursor, retrieve/patch/delete, 409 dedup, gate 400, auth, work-items add/list/remove + dédup + rejet cross-projet + payload malformé.
-- `plane/tests/contract/app/test_milestones_app.py` (7) : create/list avec compteurs, gate, guest lecture-seule, non-membre refusé, update/destroy, attach/detach, rejet issue étrangère.
+- `plane/tests/contract/api/test_milestones_v1.py` (12) : title dans la réponse (PAS name), title requis, enveloppe cursor, retrieve/patch/delete, 409 dedup, gate 400, auth, work-items add/list/remove + dédup + rejet cross-projet + payload malformé + corps non-dict → 400 (BK-1).
+- `plane/tests/contract/app/test_milestones_app.py` (8) : create/list avec compteurs, gate, guest lecture-seule, non-membre refusé, update/destroy, attach/detach, rejet issue étrangère + corps non-dict → 400 (BK-1).
 - MCP EN DIRECT (instance locale) : create/update/list_milestones, manage/list_milestone_work_items — contrat Pydantic validé.
 - `makemigrations --check` clean · turbo check:types 11/11 · oxlint 0/0 · UI navigateur.
 
@@ -57,3 +57,14 @@ Double couche backend sur modèles greenfield (calque cycles) : `plane/api` (v1 
 - Le DELETE work-items v1 porte un BODY — DRF le parse via `request.data` (ne pas transformer en URL détail).
 - `runserver` ne charge pas les nouveaux modules URL → `docker restart plane-api-1` après ajout de routes.
 - Base de la branche : `feat/estimates-time` (la migration 0128 dépend de 0127) — merger #30 avant ce module.
+
+## Revue sécurité adversariale
+
+> Session 2026-07-12 — post-implémentation v0.1.0. Corrigé en v0.1.1.
+
+| Finding | Statut | Description |
+|---------|--------|-------------|
+| BK-1 | **Corrigé (v0.1.1)** | Corps JSON non-dict sur les endpoints attach/detach work-items (v1 `plane/api/views/milestone.py` + couche app `plane/app/views/milestone/issue.py`) déclenchait une `TypeError` non gérée → 500. Garde `isinstance(request.data, dict)` ajoutée sur les deux surfaces ; renvoie désormais 400 `"Request data must be a dictionary."`. 2 tests ajoutés (1 v1 + 1 app). |
+| WB-3 | Faux positif écarté | Suspicion : `is_milestone_enabled` absent de l'entrée de nav projet. Vérifié : `project/base.py:190` expose le flag via `fields="__all__"` du serializer projet ; `project-navigation.tsx:142` gate l'entrée nav dessus. Aucune action requise. |
+| BK-3 | Gap non bloquant — accepté V1 | Pas d'audit-trail activité sur les milestones (pas de lignes `issue_activities`). Parité avec les worklogs (même décision). À évaluer en V2. |
+| WB-1, WB-2, WB-4, WB-5 | Rejetés | Faux positifs écartés lors de la revue (permissions, scoping, edge cases déjà couverts). |

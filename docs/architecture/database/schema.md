@@ -2,7 +2,7 @@
 
 > Fichier tenu à jour par `@update-writer-after-implement` après chaque migration.
 > BDD : PostgreSQL 15 · ORM : Django 4.2 (migrations dans `apps/api/plane/db/migrations/`).
-> Dernière mise à jour : 2026-07-08 (migration 0126).
+> Dernière mise à jour : 2026-07-12 (migration 0128).
 
 ---
 
@@ -159,3 +159,51 @@ Index : `(issue)`, `(project, logged_by)`. UniqueConstraint partielle : `(projec
 - `logged_by` imposé serveur à la création (jamais depuis le payload) ; édition/suppression réservées à l'auteur ou à un admin projet.
 - Rollup `total-worklogs/` = somme des minutes **par work item** (`[{issue_id, duration}]`), soft-deleted exclus (manager `objects`).
 - Pas de lignes `issue_activities` pour les worklogs : le feed d'activité web est construit côté client depuis le store worklog.
+
+---
+
+## Tables `milestones` et `milestone_issues` (jalons projet — migration `0128_milestones`, 2026-07-12)
+
+Calque structurel de `cycles`/`cycle_issues`. Activé par `Project.is_milestone_enabled` (BooleanField, défaut False).
+
+### `milestones`
+
+| Colonne | Type | Notes |
+|---------|------|-------|
+| `id` | UUID PK | Hérité de `ProjectBaseModel` |
+| `workspace_id` / `project_id` | FK | Hérité de `ProjectBaseModel` |
+| `name` | varchar(255) | Exposé `title` en v1 via `CharField(source="name")` — invariant du contrat SDK Pydantic |
+| `description` | text | Défaut `""` |
+| `target_date` | timestamptz null | Date cible du jalon |
+| `external_source` / `external_id` | varchar(255) null | Dédup import externe (409 si doublon actif sur la même paire) |
+| `sort_order` | float | Défaut 65535, auto-décalé à la création (calque Cycle) |
+| `created_at` / `updated_at` / `deleted_at` | timestamptz | Soft-delete (manager `objects` filtre `deleted_at IS NULL`) |
+| `created_by_id` / `updated_by_id` | UUID FK → users | `SET_NULL` |
+
+Annotations listes : `total_issues` / `completed_issues` (Count distinct, hors archived/draft/soft-deleted).
+
+### `milestone_issues`
+
+Table de jointure `milestones` ↔ `issues`. Calque exact de `cycle_issues`.
+
+| Colonne | Type | Notes |
+|---------|------|-------|
+| `id` | UUID PK | |
+| `workspace_id` / `project_id` | FK | Hérité de `ProjectBaseModel` |
+| `milestone_id` | FK milestones | CASCADE, related_name `issue_milestone` |
+| `issue_id` | FK issues | related_name `issue_milestone` |
+| `created_at` / `updated_at` / `deleted_at` | timestamptz | Soft-delete |
+| `created_by_id` / `updated_by_id` | UUID FK → users | `SET_NULL` |
+
+#### Contraintes d'unicité
+
+| Nom | Champs | Condition |
+|-----|--------|-----------|
+| unique_together composite | `(issue, milestone, deleted_at)` | — |
+| `milestone_issue_when_deleted_at_null` | `(issue, milestone)` | `WHERE deleted_at IS NULL` |
+
+#### Notes (milestones)
+
+- `Project.is_milestone_enabled` (BooleanField, défaut False) : gate toutes les écritures milestones → 400 si désactivé. Exposé par les serializers projet (`fields="__all__"`) et `ProjectCreateSerializer` v1 (champ écrivible).
+- La v1 expose le champ `title` (non `name`) — invariant fort du contrat SDK plane-mcp-server.
+- Pas d'audit-trail `issue_activities` pour les rattachements milestones (gap accepté V1, parité worklogs).
