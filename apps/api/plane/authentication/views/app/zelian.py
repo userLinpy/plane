@@ -4,17 +4,23 @@
 
 import base64
 import hashlib
+import os
 import secrets
 import uuid
 from urllib.parse import urlencode, urljoin
 
 # Django import
+from django.contrib.auth import logout
 from django.http import HttpResponseRedirect
+from django.utils import timezone
 from django.views import View
 
 # Module imports
 from plane.authentication.provider.oauth.zelian import ZelianOAuthProvider
+from plane.authentication.utils.host import user_ip
 from plane.authentication.utils.login import user_login
+from plane.db.models import User
+from plane.license.utils.instance_value import get_configuration_value
 from plane.authentication.utils.redirection_path import get_redirection_path
 from plane.authentication.utils.user_auth_workflow import post_user_auth_workflow
 from plane.license.models import Instance
@@ -124,3 +130,75 @@ class ZelianCallbackEndpoint(View):
                 params["next_path"] = str(validate_next_path(next_path))
             url = urljoin(base_host, "?" + urlencode(params))
             return HttpResponseRedirect(url)
+
+
+def zelian_post_logout_url(request):
+    """Où envoyer l'utilisateur après avoir fermé sa session Plane.
+
+    Sous SSO Zelian, rester dans Plane enferme l'utilisateur : la page de
+    connexion relance aussitôt l'auto-login (`auth-root.tsx`), la session
+    Supabase est toujours valide, et le voilà reconnecté sans avoir pu sortir.
+    On le renvoie donc à la mire, seule habilitée à fermer la session de
+    l'écosystème.
+
+    Retourne la racine de Plane si le SSO est inactif ou la destination non
+    configurée — le comportement d'origine est alors préservé à l'identique.
+    """
+    (IS_ZELIAN_ENABLED, ZELIAN_POST_LOGOUT_REDIRECT_URL) = get_configuration_value(
+        [
+            {
+                "key": "IS_ZELIAN_ENABLED",
+                "default": os.environ.get("IS_ZELIAN_ENABLED", "0"),
+            },
+            {
+                "key": "ZELIAN_POST_LOGOUT_REDIRECT_URL",
+                "default": os.environ.get("ZELIAN_POST_LOGOUT_REDIRECT_URL"),
+            },
+        ]
+    )
+    if IS_ZELIAN_ENABLED == "1" and ZELIAN_POST_LOGOUT_REDIRECT_URL:
+        return ZELIAN_POST_LOGOUT_REDIRECT_URL
+    return base_host(request=request, is_app=True)
+
+
+class ZelianLogoutEndpoint(View):
+    """Déconnexion déclenchable depuis l'extérieur (front-channel logout OIDC).
+
+    Se déconnecter d'une app Zelian doit fermer la session partout, Plane
+    compris. Or Plane tient sa propre session Django, indépendante de celle de
+    Supabase : détruire l'une laisse l'autre intacte.
+
+    `/auth/sign-out/` ne convient pas ici — il n'accepte que POST, donc une
+    redirection depuis la mire ne le déclenche pas. Ce point d'entrée en GET
+    joue le rôle du `frontchannel_logout_uri` d'OIDC : la mire y envoie
+    l'utilisateur après avoir fermé sa propre session.
+
+    Sécurité — la destination est prise dans la configuration serveur
+    (`ZELIAN_POST_LOGOUT_REDIRECT_URL`), jamais dans la requête : un paramètre
+    de retour librement fourni ferait de cet endpoint une redirection ouverte.
+    À défaut de configuration, on retombe sur la racine de Plane.
+
+    Un endpoint de déconnexion en GET reste exposé au « logout CSRF » — un tiers
+    peut forcer la fermeture de session via une simple balise image. La
+    conséquence se limite à une déconnexion subie, sans accès ni perte de
+    données ; c'est le compromis retenu par le front-channel logout OIDC.
+    """
+
+    def get(self, request):
+        redirect_url = zelian_post_logout_url(request)
+
+        # Session déjà fermée (ou jamais ouverte) : l'appel reste idempotent,
+        # la mire peut nous appeler sans connaître l'état côté Plane.
+        if not request.user.is_authenticated:
+            return HttpResponseRedirect(redirect_url)
+
+        try:
+            user = User.objects.get(pk=request.user.id)
+            user.last_logout_ip = user_ip(request=request)
+            user.last_logout_time = timezone.now()
+            user.save()
+        except User.DoesNotExist:
+            pass
+
+        logout(request)
+        return HttpResponseRedirect(redirect_url)

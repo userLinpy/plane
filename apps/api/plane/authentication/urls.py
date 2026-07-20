@@ -45,6 +45,7 @@ from .views import (
     GiteaCallbackSpaceEndpoint,
     GiteaOauthInitiateSpaceEndpoint,
     ZelianCallbackEndpoint,
+    ZelianLogoutEndpoint,
     ZelianOauthInitiateEndpoint,
     ZelianCallbackSpaceEndpoint,
     ZelianOauthInitiateSpaceEndpoint,
@@ -157,6 +158,9 @@ urlpatterns = [
     ## Zelian (Supabase) Oauth
     path("zelian/", ZelianOauthInitiateEndpoint.as_view(), name="zelian-initiate"),
     path("zelian/callback/", ZelianCallbackEndpoint.as_view(), name="zelian-callback"),
+    # Front-channel logout : la mire Zelian y envoie l'utilisateur pour fermer
+    # la session Plane en meme temps que celle de l'ecosysteme (GET, cf. docstring).
+    path("zelian/logout/", ZelianLogoutEndpoint.as_view(), name="zelian-logout"),
     path(
         "spaces/zelian/",
         ZelianOauthInitiateSpaceEndpoint.as_view(),
