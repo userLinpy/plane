@@ -5,10 +5,15 @@
 ## Décisions
 
 1. **Clean-room depuis `gitea`** (provider OAuth CE host-configurable) — jamais de copie plane-ee (AGPL). Le provider gitea est le modèle exact ; on ajoute PKCE S256 + `client_secret_basic`.
-2. **Seams front uniquement** (`extended.tsx`, `auth-ee.ts`, `EXTENDED_LOGIN_MEDIUM_LABELS`) → zéro modif de fichier core en v1 (revue + AGPL plus simples). `useOAuthConfig` fusionne déjà core + extended.
+2. **Seams front uniquement** (`extended.tsx`, `auth-ee.ts`, `EXTENDED_LOGIN_MEDIUM_LABELS`) → zéro modif de fichier core en v1 (revue + AGPL plus simples). `useOAuthConfig` fusionne déjà core + extended. **Exception v1.1** : l'auto-redirect SSO (décision 5 ci-dessous) a nécessité de toucher `auth-root.tsx` (fichier core AGPL) — seul moyen d'intercepter le rendu avant qu'il apparaisse. L'écart est documenté ; surveiller les merges upstream sur ce fichier.
 3. **Zéro migration** : config via `get_configuration_value` (fallback env), pattern identique aux autres providers.
 4. **Space** : utiliser les endpoints space dédiés (`/auth/spaces/zelian/`) plutôt que reproduire l'incohérence du core gitea space (qui pointe sur `/auth/gitea/`).
-5. **Exclu de v1** : l'auto-redirect « SSO sans clic » (§6 du plan) touche `auth-root.tsx` (core) → follow-up après validation E2E, avec les garde-fous (`?sso=0`, ne pas rediriger si `error_code`).
+5. **Livré en v1.1** : l'auto-redirect « SSO sans clic » (§6 du plan) — `auth-root.tsx` (core, voir exception décision 2). Garde-fous implémentés : `?sso=0` (accès admin si SSO tombe) et `!error_code` (anti-boucle infinie si le SSO échoue). Retour `<></>` anticipé pendant la redirection pour éviter que le formulaire n'apparaisse une fraction de seconde.
+
+6. **Front-channel logout** : `/auth/sign-out/` n'accepte que POST — une redirection depuis la mire ne le déclenche pas. Un endpoint GET dédié (`ZelianLogoutEndpoint`, route `zelian/logout/`) joue le rôle du `frontchannel_logout_uri` OIDC. Deux contraintes de conception inviolables :
+   - La destination de redirection vient **uniquement** de `ZELIAN_POST_LOGOUT_REDIRECT_URL` (config serveur) — jamais d'un paramètre de requête (protection contre l'open redirect).
+   - L'endpoint est idempotent : appelable sans savoir si une session Plane existe.
+     Risque assumé : « logout CSRF » (une balise image peut forcer la déconnexion) — conséquence limitée à une déconnexion subie, sans accès ni perte de données ; compromis standard du front-channel logout OIDC.
 
 ## Alternatives écartées (cf. plan §0)
 
