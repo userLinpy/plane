@@ -153,7 +153,7 @@ export const IssueBulkOperationsRoot = observer(function IssueBulkOperationsRoot
         handleSubmit={handleDelete}
       />
       <div className={cn("sticky bottom-0 left-0 z-[2] flex w-full justify-center px-3.5 pb-3", className)}>
-        <div className="flex w-full items-center gap-3 rounded-md border-[0.5px] border-strong bg-layer-1 px-3.5 py-2 shadow-md">
+        <div className="shadow-md flex w-full items-center gap-3 rounded-md border-[0.5px] border-strong bg-layer-1 px-3.5 py-2">
           {/* selection count + clear */}
           <div className="flex flex-shrink-0 items-center gap-2">
             <Tooltip tooltipContent={t("bulk_operations.clear_selection")} isMobile={isMobile}>
@@ -166,12 +166,12 @@ export const IssueBulkOperationsRoot = observer(function IssueBulkOperationsRoot
                 <X className="h-4 w-4" />
               </button>
             </Tooltip>
-            <span className="whitespace-nowrap text-sm font-medium text-primary">
+            <span className="text-sm font-medium whitespace-nowrap text-primary">
               {t("bulk_operations.selection_count", { count: selectedCount })}
             </span>
           </div>
           {/* editable properties */}
-          <div className="vertical-scrollbar horizontal-scrollbar scrollbar-sm flex min-w-0 flex-1 items-center overflow-x-auto">
+          <div className="vertical-scrollbar horizontal-scrollbar flex scrollbar-sm min-w-0 flex-1 items-center overflow-x-auto">
             <IssueBulkOperationsProperties
               projectId={projectId.toString()}
               properties={properties}

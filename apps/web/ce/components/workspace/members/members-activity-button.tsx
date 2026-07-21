@@ -35,12 +35,7 @@ export const MembersActivityButton = observer(function MembersActivityButton(pro
 
   return (
     <>
-      <Button
-        variant="secondary"
-        size="lg"
-        prependIcon={<History />}
-        onClick={() => setIsActivityDrawerOpen(true)}
-      >
+      <Button variant="secondary" size="lg" prependIcon={<History />} onClick={() => setIsActivityDrawerOpen(true)}>
         {t("common.activity")}
       </Button>
       <WorkspaceActivityDrawer

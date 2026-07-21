@@ -63,7 +63,14 @@ export class ProjectEpicsFilter extends ProjectIssuesFilter implements IProjectE
   ) {
     const currentUserId = this.rootIssueStore.currentUserId;
     if (!currentUserId) return;
-    this.handleIssuesLocalFilters.set(EIssuesStoreType.EPIC, filterType, workspaceSlug, projectId, currentUserId, filters);
+    this.handleIssuesLocalFilters.set(
+      EIssuesStoreType.EPIC,
+      filterType,
+      workspaceSlug,
+      projectId,
+      currentUserId,
+      filters
+    );
   }
 
   /**
@@ -77,7 +84,10 @@ export class ProjectEpicsFilter extends ProjectIssuesFilter implements IProjectE
       : {};
 
     const richFilters: TWorkItemFilterExpression = localFilters?.rich_filters ?? {};
-    const displayFilters = this.computedDisplayFilters(localFilters?.display_filters ?? {}, EPIC_DEFAULT_DISPLAY_FILTERS);
+    const displayFilters = this.computedDisplayFilters(
+      localFilters?.display_filters ?? {},
+      EPIC_DEFAULT_DISPLAY_FILTERS
+    );
     const displayProperties = this.computedDisplayProperties(localFilters?.display_properties ?? {});
     const kanbanFilters: TIssueKanbanFilters = {
       group_by: localFilters?.kanban_filters?.group_by ?? [],
