@@ -7,6 +7,18 @@ Format : [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/) · Versioning 
 
 ## [Unreleased]
 
+### Security
+
+- **api — rattrapage de sécurité upstream CE (lot conflictuel).** Cherry-pick isolé de correctifs de sécurité/autorisation depuis `upstream/preview` (cadre : `origin=fork` / `upstream=makeplane`, jamais de rebase de masse ; branche `fix/security-conflicts`). 9 correctifs, conflits résolus en **préservant le code Zelian** (features + SSO intacts) :
+  - **GHSA-g49r/ghcr** — scope des lectures de page-version au projet de l'URL (`permissions/page.py`, auto-merge) ;
+  - **GHSA-ch8j-vr4r-qf6h** — prévention du XSS stocké via SVG servi inline (`asset/v2.py`, `settings/common.py`) ;
+  - **GHSA-p548-28jp-wr4p** — élimination de la course TOCTOU dans `InstanceAdminSignUp` ;
+  - prévention de l'injection ORM `group_by`/`sub_group_by` + sanitisation de `order_by` sur l'API REST externe ;
+  - scoping par appartenance projet : `CycleIssue` reassignment, workspace cycles/modules listing (le fork avait déjà le scoping membership → **ajout de `project__archived_at__isnull=True`**, seule résolution manuelle), `IssueListEndpoint` guest ;
+  - prévention de la divulgation d'email d'invitation projet via GET non authentifié.
+  Vérifié : **122 tests pytest Docker** (contrat des correctifs + régression Zelian active-cycles/views-access/SSO). Complète le rattrapage débuté en #100 (SSO bot-login + ATO) et #103 (9 correctifs « clean »). Hors périmètre : refacto upstream 460 fichiers (#9245) + 2 features non-sécu.
+
+
 ### Added
 
 - **api+web/sso-zelian v0.2.0** — deux compléments au flux SSO Zelian, livrés après validation E2E complète (2026-07-20) : **(1) Auto-login SSO** (`auth-root.tsx` core AGPL modifié — premier écart au principe « seams front uniquement » de la v1) : quand `IS_ZELIAN_ENABLED=1`, la page de connexion redirige automatiquement vers `/auth/zelian/` sans clic utilisateur. Garde-fous obligatoires : `?sso=0` (formulaire classique, admin) et `error_code` présent (anti-boucle si SSO échoue). ⚠️ Risque de conflit aux merges upstream sur `auth-root.tsx` — surveiller. **(2) Front-channel logout** — `ZelianLogoutEndpoint` : route GET `/auth/zelian/logout/` qui ferme la session Django et redirige vers `ZELIAN_POST_LOGOUT_REDIRECT_URL` (config serveur uniquement — jamais de `?next` pour éviter l'open redirect). Idempotent. 7 tests unitaires offline (résistance aux redirections ouvertes). Nouvelle var `.env.example` : `ZELIAN_POST_LOGOUT_REDIRECT_URL`. 22 tests au total (15 provider + 7 logout).
