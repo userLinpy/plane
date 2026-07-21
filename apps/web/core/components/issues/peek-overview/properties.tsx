@@ -58,8 +58,14 @@ interface IPeekOverviewProperties {
 }
 
 export const PeekOverviewProperties = observer(function PeekOverviewProperties(props: IPeekOverviewProperties) {
-  const { workspaceSlug, projectId, issueId, issueOperations, disabled, issueServiceType = EIssueServiceType.ISSUES } =
-    props;
+  const {
+    workspaceSlug,
+    projectId,
+    issueId,
+    issueOperations,
+    disabled,
+    issueServiceType = EIssueServiceType.ISSUES,
+  } = props;
   const { t } = useTranslation();
   // store hooks
   const { getProjectById } = useProject();

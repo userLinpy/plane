@@ -22,10 +22,7 @@ export const extendedRoutes: RouteConfigEntry[] = [
         ]),
         // Workspace Wiki - Detail
         layout("./(all)/[workspaceSlug]/(projects)/wiki/(detail)/layout.tsx", [
-          route(
-            ":workspaceSlug/wiki/:pageId",
-            "./(all)/[workspaceSlug]/(projects)/wiki/(detail)/[pageId]/page.tsx"
-          ),
+          route(":workspaceSlug/wiki/:pageId", "./(all)/[workspaceSlug]/(projects)/wiki/(detail)/[pageId]/page.tsx"),
         ]),
       ]),
     ]),

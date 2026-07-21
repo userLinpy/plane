@@ -151,7 +151,7 @@ export const WorklogFormModal = observer(function WorklogFormModal(props: TWorkl
             />
           </div>
         </div>
-        {durationError && <span className="-mt-2 text-body-xs-regular text-danger-strong">{durationError}</span>}
+        {durationError && <span className="text-danger-strong -mt-2 text-body-xs-regular">{durationError}</span>}
 
         <div className="flex flex-col gap-1">
           <label htmlFor="worklog-description" className="text-body-xs-regular text-tertiary">

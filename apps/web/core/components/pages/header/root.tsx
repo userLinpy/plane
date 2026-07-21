@@ -37,9 +37,7 @@ export const PagesListHeaderRoot = observer(function PagesListHeaderRoot(props: 
   const { t } = useTranslation();
   // base path of the current pages list (project pages vs workspace wiki)
   const basePath =
-    storeType === EPageStoreType.WORKSPACE
-      ? `/${workspaceSlug}/wiki`
-      : `/${workspaceSlug}/projects/${projectId}/pages`;
+    storeType === EPageStoreType.WORKSPACE ? `/${workspaceSlug}/wiki` : `/${workspaceSlug}/projects/${projectId}/pages`;
   // store hooks
   const { filters, updateFilters, clearAllFilters } = usePageStore(storeType);
   const {
