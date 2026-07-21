@@ -8,6 +8,7 @@ import { useEffect, useState } from "react";
 import { observer } from "mobx-react";
 import { useSearchParams } from "next/navigation";
 // plane imports
+import { API_BASE_URL } from "@plane/constants";
 import { OAuthOptions } from "@plane/ui";
 // helpers
 import type { TAuthErrorInfo } from "@/helpers/authentication.helper";
@@ -39,6 +40,8 @@ export const AuthRoot = observer(function AuthRoot(props: TAuthRoot) {
   const invitation_id = searchParams.get("invitation_id");
   const workspaceSlug = searchParams.get("slug");
   const error_code = searchParams.get("error_code");
+  const ssoParam = searchParams.get("sso");
+  const next_path = searchParams.get("next_path");
   // props
   const { authMode: currentAuthMode } = props;
   // states
@@ -53,10 +56,32 @@ export const AuthRoot = observer(function AuthRoot(props: TAuthRoot) {
   const { isOAuthEnabled, oAuthOptions } = useOAuthConfig(oAuthActionText);
   const isEmailBasedAuthEnabled = config?.is_email_password_enabled || config?.is_magic_login_enabled;
   const noAuthMethodsAvailable = !isOAuthEnabled && !isEmailBasedAuthEnabled;
+  // ── SSO Zelian sans clic (module api/sso-zelian) ───────────────────────────
+  // Quand le SSO Zelian est actif, la mire Zelian est le point d'entrée unique
+  // de l'écosystème : inutile de faire cliquer « Continue with Zelian », on y
+  // envoie directement. Deux garde-fous, imposés par le tech-design du module :
+  //   • `?sso=0` — laisse le formulaire classique accessible. Sans cette
+  //     échappatoire, un admin d'instance ne pourrait plus jamais se connecter
+  //     en e-mail/mot de passe si le SSO tombe.
+  //   • `error_code` présent — ne pas rediriger : l'erreur vient justement du
+  //     SSO, y retourner boucherait à l'infini sans jamais l'afficher.
+  const shouldAutoRedirectToZelian = Boolean(config?.is_zelian_enabled) && ssoParam !== "0" && !error_code;
 
   useEffect(() => {
     if (!authMode && currentAuthMode) setAuthMode(currentAuthMode);
   }, [currentAuthMode, authMode]);
+
+  useEffect(() => {
+    if (!shouldAutoRedirectToZelian) return;
+    // Même construction d'URL que le bouton « Continue with Zelian »
+    // (hooks/oauth/extended.tsx). `API_BASE_URL` est indispensable : la route
+    // est servie par le backend Django, qui n'est pas sur la même origine que
+    // le front en développement (3000 vs 8000). Un chemin relatif tomberait
+    // sur le routeur front, qui ne connaît pas cette route.
+    window.location.assign(
+      `${API_BASE_URL}/auth/zelian/${next_path ? `?next_path=${encodeURIComponent(next_path)}` : ""}`
+    );
+  }, [shouldAutoRedirectToZelian, next_path]);
 
   useEffect(() => {
     if (error_code && authMode) {
@@ -102,6 +127,10 @@ export const AuthRoot = observer(function AuthRoot(props: TAuthRoot) {
 
   if (!authMode) return <></>;
 
+  // Redirection en cours : ne rien afficher, sinon le formulaire de connexion
+  // apparaît une fraction de seconde avant de disparaître.
+  if (shouldAutoRedirectToZelian) return <></>;
+
   if (noAuthMethodsAvailable) {
     return (
       <AuthContainer>
@@ -137,10 +166,10 @@ export const AuthRoot = observer(function AuthRoot(props: TAuthRoot) {
           authStep={authStep}
           authMode={authMode}
           email={email}
-          setEmail={(email) => setEmail(email)}
-          setAuthMode={(authMode) => setAuthMode(authMode)}
-          setAuthStep={(authStep) => setAuthStep(authStep)}
-          setErrorInfo={(errorInfo) => setErrorInfo(errorInfo)}
+          setEmail={setEmail}
+          setAuthMode={setAuthMode}
+          setAuthStep={setAuthStep}
+          setErrorInfo={setErrorInfo}
           currentAuthMode={currentAuthMode}
         />
       )}
