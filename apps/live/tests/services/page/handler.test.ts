@@ -27,10 +27,7 @@ describe("getPageService", () => {
   });
 
   it("should resolve workspace_page to a WorkspacePageService", () => {
-    const service = getPageService(
-      "workspace_page",
-      buildContext({ documentType: "workspace_page", projectId: null })
-    );
+    const service = getPageService("workspace_page", buildContext({ documentType: "workspace_page", projectId: null }));
     expect(service).toBeInstanceOf(WorkspacePageService);
   });
 

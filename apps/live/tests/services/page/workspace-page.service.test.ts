@@ -39,9 +39,7 @@ describe("WorkspacePageService", () => {
   describe("fetchDescriptionBinary", () => {
     it("should GET the workspace-scoped description endpoint", async () => {
       const service = buildService();
-      const getSpy = vi
-        .spyOn(service, "get")
-        .mockResolvedValue({ data: Buffer.from([1, 2, 3]) } as never);
+      const getSpy = vi.spyOn(service, "get").mockResolvedValue({ data: Buffer.from([1, 2, 3]) } as never);
 
       await service.fetchDescriptionBinary(PAGE_ID);
 
