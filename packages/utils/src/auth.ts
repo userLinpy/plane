@@ -36,7 +36,7 @@ export const getPasswordStrength = (password: string): E_PASSWORD_STRENGTH => {
   const hasUpperCase = /[A-Z]/.test(password);
   const hasLowerCase = /[a-z]/.test(password);
   const hasDigit = /[0-9]/.test(password);
-  const hasSpecialChar = /[!@#$%^&*()\-_+=\[\]{}|;:'",.<>?/]/.test(password);
+  const hasSpecialChar = /[!@#$%^&*()\-_+=[\]{}|;:'",.<>?/]/.test(password);
 
   if (hasUpperCase && hasLowerCase && hasDigit && hasSpecialChar) {
     return E_PASSWORD_STRENGTH.STRENGTH_VALID;
@@ -78,7 +78,7 @@ export const getPasswordCriteria = (password: string): PasswordCriteria[] => [
   {
     key: "special",
     label: "Min 1 special character",
-    isValid: /[!@#$%^&*()\-_+=\[\]{}|;:'",.<>?/]/.test(password),
+    isValid: /[!@#$%^&*()\-_+=[\]{}|;:'",.<>?/]/.test(password),
   },
 ];
 
@@ -142,6 +142,10 @@ const errorCodeMessages: {
     message: () => `Invalid email. Please try again.`,
   },
   // sign in
+  [EAuthErrorCodes.BOT_USER_LOGIN_FORBIDDEN]: {
+    title: `Sign in not allowed`,
+    message: () => `This account cannot be used to sign in. Please use a personal account.`,
+  },
   [EAuthErrorCodes.USER_ACCOUNT_DEACTIVATED]: {
     title: `User account deactivated`,
     message: () => `User account deactivated. Please contact administrator.`,
@@ -349,6 +353,7 @@ export const authErrorHandler = (errorCode: EAuthErrorCodes, email?: string): TA
     EAuthErrorCodes.ADMIN_AUTHENTICATION_FAILED,
     EAuthErrorCodes.ADMIN_USER_ALREADY_EXIST,
     EAuthErrorCodes.ADMIN_USER_DOES_NOT_EXIST,
+    EAuthErrorCodes.BOT_USER_LOGIN_FORBIDDEN,
     EAuthErrorCodes.USER_ACCOUNT_DEACTIVATED,
   ];
 
