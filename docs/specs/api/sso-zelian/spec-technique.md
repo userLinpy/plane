@@ -3,8 +3,8 @@
 | Champ   | Valeur                                       |
 | ------- | -------------------------------------------- |
 | Module  | api/sso-zelian                               |
-| Version | 0.1.1                                        |
-| Date    | 2026-07-13                                   |
+| Version | 0.1.2                                        |
+| Date    | 2026-07-18                                   |
 | Statut  | IMPLÉMENTÉ et validé E2E (local, 2026-07-13) |
 
 ---
