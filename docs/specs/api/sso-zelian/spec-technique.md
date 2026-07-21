@@ -27,17 +27,17 @@ Réplication **clean-room** du provider OAuth `gitea` (host configurable) + 2 aj
 
 ## Fichiers modifiés
 
-| Fichier                                           | Modification                                                                                            |
-| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| `apps/api/plane/authentication/adapter/error.py`  | `ZELIAN_NOT_CONFIGURED=5113`, `ZELIAN_OAUTH_PROVIDER_ERROR=5124`                                        |
-| `apps/api/plane/authentication/adapter/oauth.py`  | branche `zelian` dans `authentication_error_code()`                                                     |
-| `apps/api/plane/authentication/views/__init__.py` | exports app + space                                                                                     |
-| `apps/api/plane/authentication/urls.py`           | 4 routes : `zelian/`, `zelian/callback/`, `spaces/zelian/`, `spaces/zelian/callback/`                   |
-| `apps/api/plane/license/api/views/instance.py`    | `IS_ZELIAN_ENABLED` → `data["is_zelian_enabled"]`                                                       |
-| `apps/api/.env.example`                           | doc des vars `IS_ZELIAN_ENABLED` / `ZELIAN_AUTH_BASE_URL` / `ZELIAN_CLIENT_ID` / `ZELIAN_CLIENT_SECRET` |
-| `packages/types/src/instance/auth-ee.ts`          | `TExtendedLoginMediums = "zelian"`                                                                      |
-| `packages/types/src/instance/base.ts`             | `is_zelian_enabled: boolean` sur `IInstanceConfig`                                                      |
-| `packages/constants/src/auth/extended.ts`         | `EXTENDED_LOGIN_MEDIUM_LABELS.zelian = "Zelian"`                                                        |
+| Fichier                                           | Modification                                                                                                                                                                                   |
+| ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `apps/api/plane/authentication/adapter/error.py`  | `ZELIAN_NOT_CONFIGURED=5113`, `ZELIAN_OAUTH_PROVIDER_ERROR=5910` — codes du fork dans le bloc `59xx` réservé ; `5124` est désormais possédé par l'upstream (`OAUTH_PROVIDER_UNVERIFIED_EMAIL`) |
+| `apps/api/plane/authentication/adapter/oauth.py`  | branche `zelian` dans `authentication_error_code()`                                                                                                                                            |
+| `apps/api/plane/authentication/views/__init__.py` | exports app + space                                                                                                                                                                            |
+| `apps/api/plane/authentication/urls.py`           | 4 routes : `zelian/`, `zelian/callback/`, `spaces/zelian/`, `spaces/zelian/callback/`                                                                                                          |
+| `apps/api/plane/license/api/views/instance.py`    | `IS_ZELIAN_ENABLED` → `data["is_zelian_enabled"]`                                                                                                                                              |
+| `apps/api/.env.example`                           | doc des vars `IS_ZELIAN_ENABLED` / `ZELIAN_AUTH_BASE_URL` / `ZELIAN_CLIENT_ID` / `ZELIAN_CLIENT_SECRET`                                                                                        |
+| `packages/types/src/instance/auth-ee.ts`          | `TExtendedLoginMediums = "zelian"`                                                                                                                                                             |
+| `packages/types/src/instance/base.ts`             | `is_zelian_enabled: boolean` sur `IInstanceConfig`                                                                                                                                             |
+| `packages/constants/src/auth/extended.ts`         | `EXTENDED_LOGIN_MEDIUM_LABELS.zelian = "Zelian"`                                                                                                                                               |
 
 ## Contrat OAuth (endpoints Supabase)
 
