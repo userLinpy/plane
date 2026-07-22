@@ -4,12 +4,26 @@
 
 from django.urls import path
 
-from plane.app.views.zelian import ZelianProvisioningEndpoint
+from plane.app.views.zelian import (
+    ZelianProvisioningEndpoint,
+    ZelianTracesInventoryEndpoint,
+    ZelianTracesTreatmentEndpoint,
+)
 
 urlpatterns = [
     path(
         "zelian/provisioning/",
         ZelianProvisioningEndpoint.as_view(http_method_names=["post"]),
         name="zelian-provisioning",
+    ),
+    path(
+        "zelian/traces/inventory/",
+        ZelianTracesInventoryEndpoint.as_view(http_method_names=["post"]),
+        name="zelian-traces-inventory",
+    ),
+    path(
+        "zelian/traces/treatment/",
+        ZelianTracesTreatmentEndpoint.as_view(http_method_names=["post"]),
+        name="zelian-traces-treatment",
     ),
 ]
