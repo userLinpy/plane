@@ -3,3 +3,7 @@
 # See the LICENSE file for details.
 
 from .provisioning import ZelianProvisioningEndpoint
+from .traces import (
+    ZelianTracesInventoryEndpoint,
+    ZelianTracesTreatmentEndpoint,
+)

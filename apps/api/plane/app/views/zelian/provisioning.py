@@ -7,20 +7,17 @@
 # Auth : secret de service partagé (convention Insider §9.11 / §8.7, règle 07) —
 # jamais le JWT identité ni un token utilisateur.
 
-import hmac
 import logging
-import os
 import uuid
 
 from django.db import transaction
 from rest_framework import status
-from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
 # Module imports
 from plane.app.views.base import BaseAPIView
+from plane.app.views.zelian._base import ZelianServiceAuthMixin
 from plane.db.models import ProjectMember, User, Workspace, WorkspaceMember
-from plane.license.utils.instance_value import get_configuration_value
 
 logger = logging.getLogger("plane.zelian.provisioning")
 
@@ -30,7 +27,7 @@ DEFAULT_ROLE = 15  # RM-03 : Membre par défaut à la création
 MAX_BATCH = 1000
 
 
-class ZelianProvisioningEndpoint(BaseAPIView):
+class ZelianProvisioningEndpoint(ZelianServiceAuthMixin, BaseAPIView):
     """Provisionne / désactive des membres du workspace depuis l'annuaire Zelian.
 
     Appel **server-to-server** (le service de synchronisation Zelian, pas un humain),
@@ -45,26 +42,6 @@ class ZelianProvisioningEndpoint(BaseAPIView):
     (RM-11) ; cascade Invité (RM-14). **Zéro migration** (ADR-002) : réutilise ``User`` et
     ``WorkspaceMember``.
     """
-
-    authentication_classes = []
-    permission_classes = [AllowAny]
-
-    def _is_authorized(self, request):
-        (secret,) = get_configuration_value(
-            [
-                {
-                    "key": "ZELIAN_PROVISIONING_SECRET",
-                    "default": os.environ.get("ZELIAN_PROVISIONING_SECRET"),
-                }
-            ]
-        )
-        # Fail-closed : sans secret configuré, la porte reste fermée pour tout le monde.
-        if not secret:
-            return False
-        provided = request.headers.get("X-Zelian-Provisioning-Key", "")
-        return hmac.compare_digest(
-            provided.encode("utf-8"), str(secret).encode("utf-8")
-        )
 
     def post(self, request):
         if not self._is_authorized(request):
@@ -175,6 +152,18 @@ class ZelianProvisioningEndpoint(BaseAPIView):
             user.last_name = last_name
             user.save()
             created_user = True
+        elif user.masked_at is not None:
+            # US-06 companion : recoche d'un compte « Profil supprimé » (traces conservées,
+            # RM-07) -> on lève le tombstone et on restaure une identité propre depuis
+            # l'annuaire, sinon le revenant resterait marqué et bloqué au login (gate GHSA).
+            name = (item.get("name") or "").strip()
+            user.first_name, _, user.last_name = name.partition(" ")
+            user.display_name = name  # vide -> recalculé (préfixe email) par User.save()
+            user.avatar = ""
+            user.masked_at = None
+            user.last_logout_time = None
+            user.is_active = True
+            user.save()
         elif not user.is_active:
             user.is_active = True
             user.save(update_fields=["is_active"])
