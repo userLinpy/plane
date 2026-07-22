@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generated_by": "zelian-framework@3.0.0",
-  "updated_at": "2026-07-21T19:20:46.556Z",
+  "updated_at": "2026-07-22T17:54:57.432Z",
   "entries": [
     {
       "id": "api/active-cycles-workspace",
@@ -362,7 +362,10 @@
         "apps/api/plane/app/views/zelian/__init__.py",
         "apps/api/plane/app/urls/zelian.py",
         "apps/api/plane/app/urls/__init__.py",
-        "apps/api/plane/tests/contract/app/test_zelian_provisioning_app.py"
+        "apps/api/plane/tests/contract/app/test_zelian_provisioning_app.py",
+        "apps/api/plane/app/views/zelian/_base.py",
+        "apps/api/plane/app/views/zelian/traces.py",
+        "apps/api/plane/tests/contract/app/test_zelian_traces_app.py"
       ],
       "keywords": [
         "provisioning",
@@ -372,7 +375,7 @@
         "sync",
         "manage"
       ],
-      "updated_at": "2026-07-21T19:20:46.556Z"
+      "updated_at": "2026-07-22T17:54:57.429Z"
     },
     {
       "id": "api/sso-zelian",
