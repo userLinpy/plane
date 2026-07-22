@@ -24,12 +24,20 @@ aucun nouveau champ (le tombstone réutilise `User.masked_at`, champ dormant de 
 - Secret de service partagé en en-tête `X-Zelian-Provisioning-Key`, lu via `get_configuration_value`
   (config instance chiffrable / fallback env — gestionnaire de secrets, règle 07 Insider), comparé en
   **temps constant** (`hmac.compare_digest`). **Fail-closed** : sans secret configuré, tout est refusé
-  (403). Convention Insider `09-architecture-auth §9.11` / `HUB-TOOLS-ANALYSE §8.7` — jamais le JWT
-  identité ni un token utilisateur (Plane est un outil tiers).
-- `authentication_classes = []`, `permission_classes = [AllowAny]`, **`throttle_classes = []`** : ces
-  endpoints machine sont exemptés du throttle anonyme DRF (`anon: 30/minute`, `settings/common.py`) qui
-  brimerait à tort les lots légitimes de Manage (offboarding en masse) ; la garde est le **secret**, pas
-  l'IP, et un secret erroné est déjà rejeté (403) avant tout traitement.
+  (403).
+- **Conformité doctrine (nuancée)** : la méthode **s'inspire de** `09-architecture-auth §9.11`
+  (server-to-server *limité, journalisé, secret dans le gestionnaire de secrets*, règle 07 — respecté)
+  et l'**adapte**. `HUB-TOOLS-ANALYSE §8.7` prescrit « **service account + token API scoppé** » pour
+  *lire* Plane (mode C) ; mais provisionner des membres / purger / supprimer un compte est **hors
+  surface API** de Plane (extension ORM « isolée et publiable », sanctionnée par la doctrine
+  outil-externe / repo séparé) → un **secret de service instance-level** est le mécanisme adéquat, pas
+  un token utilisateur scoppé. Jamais le JWT identité (ES256, humains) ni un token utilisateur. *Point
+  ouvert* : moindre-privilège plus fin (secret lecture vs destructif) possible en durcissement ultérieur.
+- `authentication_classes = []`, `permission_classes = [AllowAny]` (endpoints machine) ;
+  `throttle_classes = [ZelianFailedAuthThrottle]` : throttle **uniquement les échecs** d'auth (secret
+  absent/faux, `30/min` par IP) — un appel au **bon secret n'est jamais bridé** (offboarding en masse),
+  ce qui borne la devinette de secret sans pénaliser Manage. (Le throttle anonyme global de
+  `settings/common.py` est par IP → inadapté à un endpoint machine ; on ne l'utilise pas.)
 
 ### US-01→05 — provisioning (endpoint `provisioning/`)
 
@@ -68,10 +76,17 @@ unitaire (issue/commentaire), on supprime d'abord les `IssueActivity` liées, si
 FK au COMMIT (FK Postgres `DEFERRABLE INITIALLY DEFERRED`). Au grain projet, la cascade via
 `IssueActivity.project` suffit. Clés S3 des `FileAsset` collectées avant suppression (voir effacement S3).
 
-**Projet partagé (cas 8)** — un `traces/treatment` `action:"purge"` sur un projet contenant des
-contributions/membres actifs d'autrui **ne détruit pas** le projet en entier (`purged_own_only`) : seuls
-les items de la personne sont purgés. La légation est la voie recommandée pour transférer un projet
-partagé.
+**Self-FK `parent` (Issue/IssueComment/Page) = `CASCADE`** — piège majeur : hard-deleter un parent
+emporterait les sous-issues/réponses/sous-pages d'**autrui** (destruction + `IssueActivity` orphelin →
+IntegrityError). `_own_closure_detach_foreign` **détache** (`parent=None`) les descendants d'autrui
+(préservés) et **étend** la suppression aux descendants **propres** (activités nettoyées sur la fermeture
+complète) ; les pages détachent leurs enfants avant `delete(soft=False)`. Fermeture bornée (chaque nœud
+enfilé une seule fois — sûr même sur un cycle de `parent`).
+
+**Projet partagé (cas 8)** — `_is_shared` (conservateur) détecte tout membre (actif **ou non**), issue,
+commentaire, page, cycle, vue, module ou pièce jointe d'**autrui**. Un `action:"purge"` sur un projet
+partagé **ne détruit pas** le projet en entier (`purged_own_only`) : seuls les items de la personne sont
+purgés. La légation est la voie recommandée pour transférer un projet partagé.
 
 **Légation (RM-08 / cas 7)** — repreneur = `WorkspaceMember` actif requis (sinon `rejected /
 successor_not_active_member`). Le repreneur devient `ProjectMember` **ADMIN actif** ; repoints via
@@ -87,17 +102,25 @@ via `UserLiteSerializer`, **sans nouvelle surface front**), `avatar=""`, `avatar
 désactivés.
 
 **Suppression du compte (RM-06, `account:"delete"`, purge totale)** — ordre strict :
-1. **Refus** amont si `Workspace.objects.filter(owner=user).exists()` (`rejected / owns_workspace`) : ne
-   jamais risquer de supprimer un workspace en cascade.
-2. Purge de tout le contenu structuré de la personne (issues/commentaires/pages), + **toutes** ses
-   `FileAsset` (clés S3 collectées).
-3. Neutralisation des liens CASCADE vers des conteneurs d'autrui : `project_lead`/`default_assignee` →
-   `NULL` (nullables) ; `Cycle.owned_by`/`IssueView.owned_by` (non-nullables) → réattribués à
-   `workspace.owner`.
-4. `user.delete()` (`User` n'est **pas** un `SoftDeleteModel` : suppression dure directe ; la cascade
-   n'emporte plus que ses propres données — profil, préférences, tokens, sessions, memberships).
-   ⇒ Recoche ultérieure (US-01) recrée un membre **vierge** (nouveau `User`), les données purgées ne
-   réapparaissent jamais.
+1. **Refus** amont si `Workspace.all_objects.filter(owner=user)` (`rejected / owns_workspace`) —
+   `all_objects` couvre aussi un workspace **soft-deleted** (que la cascade détruirait quand même).
+2. Purge du contenu propre dans le workspace visé (issues/commentaires/**pages partagées préservées**).
+3. Pièces jointes : **réattribuées** dans les projets légués (projet intact), **purgées** (S3 inclus)
+   ailleurs — sinon la cascade `FileAsset.user` (CASCADE) les emporterait sans effacer S3.
+4. Purge **GLOBALE** landmine-safe de ses commentaires (tous workspaces) : sans ça, `user.delete()`
+   cascade les commentaires hors-workspace → `IssueActivity` orphelins → IntegrityError.
+5. Neutralisation **GLOBALE** de TOUT conteneur partagé CASCADE→User : `project_lead`/`default_assignee`
+   → `NULL` ; `Cycle`/`IssueView`/`Page`/`PageVersion`/`IssueVersion`/`IssueDescriptionVersion.owned_by`
+   et `WorkspaceTheme`/`WorkspaceIntegration`/`GithubRepositorySync.actor` → owner du workspace.
+6. `user.delete()` (`User` n'est **pas** un `SoftDeleteModel` : suppression dure directe ; la cascade
+   n'emporte plus que ses données propres — profil, préférences, tokens, sessions, memberships,
+   réactions, favoris, liens perso). Issues d'autres workspaces survivent (`created_by` SET_NULL).
+   ⇒ Recoche ultérieure (US-01) recrée un membre **vierge** (nouveau `User`).
+
+*Compromis documentés (sûrs, non destructifs — validés par double revue adversariale)* : réattribution
+cross-workspace vers l'owner du workspace visé (une purge par workspace serait plus fine) ; une
+sous-issue **propre** nichée sous un nœud d'**autrui** est préservée (détachée) plutôt que purgée
+(doctrine « préserver plutôt que détruire »).
 
 **Effacement physique S3/MinIO (RGPD droit à l'effacement)** — les clés d'objets (`FileAsset.asset`) sont
 collectées pendant la transaction, puis supprimées via `S3Storage().delete_files(...)` (pattern existant
@@ -112,7 +135,11 @@ best-effort, une indispo S3 ne casse ni ne partialise la purge BDD (déjà défi
   résidu).
 - **Tombstone via champs display + `masked_at`** (champ dormant réutilisé) — zéro migration, zéro
   nouvelle surface front.
-- **Endpoints machine exemptés du throttle anonyme** — garde = secret, pas IP.
+- **Throttle sur les échecs d'auth uniquement** (`ZelianFailedAuthThrottle`, bon secret jamais bridé) —
+  garde = secret, pas IP ; borne la devinette sans pénaliser Manage (offboarding en masse).
+- **Préserver le contenu d'autrui à tous les grains** (cas 8 généralisé) : jamais détruire une
+  sous-issue / réponse / sous-page / cycle / vue / page d'autrui ; conteneurs partagés réattribués,
+  descendants d'autrui détachés — hard-delete réservé au contenu strictement propre.
 - **Effacement S3 post-commit découplé** — conformité RGPD sans coupler la purge BDD à la dispo S3.
 
 (Aucune de ces décisions ne passe la checklist ADR — confinées au module ; cf. `06-adr-policy.md` Q3.)
@@ -122,7 +149,7 @@ best-effort, une indispo S3 ne casse ni ne partialise la purge BDD (déjà défi
 **Créés** :
 - `apps/api/plane/app/views/zelian/_base.py` — `ZelianServiceAuthMixin` (auth secret partagée + exemption throttle).
 - `apps/api/plane/app/views/zelian/traces.py` — `ZelianTracesInventoryEndpoint`, `ZelianTracesTreatmentEndpoint` + helpers purge/légation/tombstone/suppression.
-- `apps/api/plane/tests/contract/app/test_zelian_traces_app.py` — 25 tests de contrat.
+- `apps/api/plane/tests/contract/app/test_zelian_traces_app.py` — 35 tests de contrat.
 
 **Modifiés** :
 - `apps/api/plane/app/views/zelian/provisioning.py` — hérite du mixin (auth dédupliquée) ; companion « dé-tombstone » dans `_provision`.
@@ -154,11 +181,15 @@ best-effort, une indispo S3 ne casse ni ne partialise la purge BDD (déjà défi
 
 ## Tests / vérification (2026-07-22, conteneur `plane-api-1`)
 
-- **25 tests de contrat** `test_zelian_traces_app.py` : inventaire (unknown/compteurs/`shared`/protégé/
+- **35 tests de contrat** `test_zelian_traces_app.py` : inventaire (unknown/compteurs/`shared`/protégé/
   auth), purge **définitive via `all_objects`**, landmine `IssueActivity` sans `IntegrityError`, projet
-  partagé + workspace préservés (cas 8), suppression compte + **recoche vierge** + refus `owns_workspace`
-  + neutralisation `project_lead`/`Cycle`/`IssueView`, légation + refus repreneur inactif (cas 7),
-  tombstone + companion dé-tombstone, silence (`mail.outbox`), effacement S3 (mock + `on_commit`).
-- **Régression** : 15 tests provisioning verts (suite combinée 40 verte après exemption throttle).
+  partagé + workspace préservés (cas 8), **page partagée préservée** (réattribuée), **sous-issue /
+  réponse / sous-page d'autrui préservées** (parent-cascade), suppression compte + **recoche vierge** +
+  refus `owns_workspace` (y c. workspace **soft-deleted**) + neutralisation cascade, **delete
+  multi-workspace sans crash**, légation + refus repreneur inactif (cas 7), tombstone + companion
+  dé-tombstone, throttle (bon secret jamais bridé), silence (`mail.outbox`), effacement S3.
+- **Régression** : 15 tests provisioning verts (suite combinée **50** verte).
+- **Double revue adversariale** (workflow 4 relecteurs + re-vérif) : 12 défauts corrigés (dont 4
+  blockers parent-cascade / crash), re-vérif sans blocker ni majeur résiduel.
 - `makemigrations --check --dry-run` : **No changes detected** (zéro migration). `ruff check` (0.9.7 et
   latest) : All checks passed. En-tête copyright conforme à `COPYRIGHT.txt`.

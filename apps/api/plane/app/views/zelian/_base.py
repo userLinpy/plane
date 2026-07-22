@@ -10,8 +10,54 @@ import hmac
 import os
 
 from rest_framework.permissions import AllowAny
+from rest_framework.throttling import SimpleRateThrottle
 
 from plane.license.utils.instance_value import get_configuration_value
+
+
+def _secret_matches(request):
+    """Vrai si l'en-tête porte le secret de service configuré (comparaison temps constant).
+
+    **Fail-closed** : sans secret configuré, retourne toujours Faux (règle 07 : le secret
+    vit dans le gestionnaire de secrets / env, jamais dans le repo).
+    """
+    (secret,) = get_configuration_value(
+        [
+            {
+                "key": "ZELIAN_PROVISIONING_SECRET",
+                "default": os.environ.get("ZELIAN_PROVISIONING_SECRET"),
+            }
+        ]
+    )
+    if not secret:
+        return False
+    provided = request.headers.get("X-Zelian-Provisioning-Key", "")
+    return hmac.compare_digest(
+        provided.encode("utf-8"), str(secret).encode("utf-8")
+    )
+
+
+class ZelianFailedAuthThrottle(SimpleRateThrottle):
+    """Throttle **uniquement les échecs d'auth** (secret absent ou faux), par IP.
+
+    Les appels au bon secret ne sont **jamais** bridés — Manage peut enchaîner un
+    offboarding en masse sans être limité par le throttle anonyme DRF. En revanche, un
+    appelant sans le bon secret est borné à quelques tentatives/minute : ça garde une
+    défense contre la devinette du secret sur cet endpoint ``AllowAny``, sans pénaliser
+    l'usage légitime (moindre-privilège pragmatique).
+    """
+
+    scope = "zelian_failed_auth"
+    rate = "30/min"
+
+    def get_cache_key(self, request, view):
+        # Bon secret -> None => SimpleRateThrottle ne compte pas la requête (jamais throttlé).
+        if _secret_matches(request):
+            return None
+        return self.cache_format % {
+            "scope": self.scope,
+            "ident": self.get_ident(request),
+        }
 
 
 class ZelianServiceAuthMixin:
@@ -24,29 +70,12 @@ class ZelianServiceAuthMixin:
 
     Utilisé par ``ZelianProvisioningEndpoint`` (US-01→05) et les endpoints ``traces`` (US-06),
     tous deux appelés par le service de synchronisation Zelian (Manage), pas par un humain.
+    Le throttle ne s'applique qu'aux **échecs** d'auth (voir ``ZelianFailedAuthThrottle``).
     """
 
     authentication_classes = []
     permission_classes = [AllowAny]
-    # Endpoints machine (server-to-server) : la garde est le secret de service, pas l'IP.
-    # On exempte du throttle anonyme DRF (`anon: 30/minute`, common.py) qui, sur ces
-    # ``AllowAny``, brimerait à tort les lots légitimes de Manage (offboarding en masse) —
-    # un secret erroné est déjà rejeté (403) avant tout traitement.
-    throttle_classes = []
+    throttle_classes = [ZelianFailedAuthThrottle]
 
     def _is_authorized(self, request):
-        (secret,) = get_configuration_value(
-            [
-                {
-                    "key": "ZELIAN_PROVISIONING_SECRET",
-                    "default": os.environ.get("ZELIAN_PROVISIONING_SECRET"),
-                }
-            ]
-        )
-        # Fail-closed : sans secret configuré, la porte reste fermée pour tout le monde.
-        if not secret:
-            return False
-        provided = request.headers.get("X-Zelian-Provisioning-Key", "")
-        return hmac.compare_digest(
-            provided.encode("utf-8"), str(secret).encode("utf-8")
-        )
+        return _secret_matches(request)

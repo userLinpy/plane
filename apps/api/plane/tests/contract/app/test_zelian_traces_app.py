@@ -22,6 +22,7 @@ import uuid
 import pytest
 from crum import impersonate
 from django.core import mail
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APIClient
 
@@ -33,6 +34,7 @@ from plane.db.models import (
     IssueComment,
     IssueView,
     Page,
+    PageVersion,
     Project,
     ProjectMember,
     ProjectPage,
@@ -473,3 +475,183 @@ class TestZelianTracesS3:
         assert resp.status_code == status.HTTP_200_OK
         assert FileAsset.all_objects.filter(pk=asset.pk).exists() is False
         assert asset.asset.name in calls.get("keys", [])
+
+
+def _cycle(workspace, project, owner, name="C1"):
+    return Cycle.objects.create(
+        name=name, project=project, workspace=workspace, owned_by=owner
+    )
+
+
+def _page_version(workspace, page, author):
+    return PageVersion.objects.create(
+        workspace=workspace, page=page, owned_by=author
+    )
+
+
+@pytest.mark.contract
+@pytest.mark.django_db
+class TestZelianTracesSharedContent:
+    """Correctifs de la revue adversariale : ne jamais détruire le contenu d'autrui."""
+
+    def test_shared_page_preserved_and_reassigned(self, workspace, create_user, configured):
+        alice = _make_user("alice@zelian.fr")
+        _member(workspace, alice)
+        bob = _make_user("bob@zelian.fr")
+        _member(workspace, bob)
+        page = _page(workspace, alice)  # possédée par alice
+        _page_version(workspace, page, bob)  # bob l'a éditée -> page partagée
+
+        resp = _treat({"email": "alice@zelian.fr", "account": "mask", "categories": {"pages": True}})
+        assert resp.status_code == status.HTTP_200_OK
+        # préservée (pas détruite) et réattribuée à l'owner du workspace
+        page.refresh_from_db()
+        assert Page.all_objects.filter(pk=page.pk).exists() is True
+        assert page.owned_by_id == create_user.id
+
+    def test_personal_page_is_purged(self, workspace, configured):
+        alice = _make_user("alice@zelian.fr")
+        _member(workspace, alice)
+        page = _page(workspace, alice)  # aucune version d'autrui -> perso
+
+        _treat({"email": "alice@zelian.fr", "account": "mask", "categories": {"pages": True}})
+        assert Page.all_objects.filter(pk=page.pk).exists() is False  # purgée (définitif)
+
+    def test_purge_project_shared_via_others_cycle_preserved(self, workspace, configured):
+        alice = _make_user("alice@zelian.fr")
+        _member(workspace, alice)
+        bob = _make_user("bob@zelian.fr")
+        _member(workspace, bob)
+        project = _project(workspace, alice)
+        alice_issue = _issue(workspace, project, alice)
+        cycle = _cycle(workspace, project, bob)  # cycle d'autrui -> projet partagé (non-issue)
+
+        resp = _treat({"email": "alice@zelian.fr", "account": "mask",
+                       "projects": [{"project_id": str(project.id), "action": "purge"}]})
+        op = resp.data["operations"][0]
+        assert op["result"] == "purged_own_only"  # défaut #3 corrigé
+        assert Cycle.all_objects.filter(pk=cycle.pk).exists() is True  # cycle de bob intact
+        assert Project.all_objects.filter(pk=project.pk).exists() is True
+        assert Issue.all_objects.filter(pk=alice_issue.pk).exists() is False
+
+    def test_account_delete_with_cross_workspace_comment_no_crash(
+        self, workspace, create_user, configured
+    ):
+        alice = _make_user("alice@zelian.fr")
+        _member(workspace, alice)
+        # 2e workspace : alice a commenté l'issue d'autrui (contenu hors du workspace visé)
+        ws2 = Workspace.objects.create(name="W2", owner=create_user, slug="ws2")
+        WorkspaceMember.objects.create(workspace=ws2, member=alice, role=15, is_active=True)
+        p2 = _project(ws2, create_user)
+        issue2 = _issue(ws2, p2, create_user)
+        comment2 = _comment(ws2, p2, issue2, alice)
+        _activity(ws2, p2, comment=comment2)  # IssueActivity -> issue_comment (DO_NOTHING)
+
+        resp = _treat({"email": "alice@zelian.fr", "account": "delete"})  # via test-workspace
+        assert resp.status_code == status.HTTP_200_OK  # pas d'IntegrityError (défaut #1 corrigé)
+        assert resp.data["account"] == "deleted"
+        assert User.objects.filter(pk=alice.pk).exists() is False
+        assert IssueComment.all_objects.filter(pk=comment2.pk).exists() is False  # purge globale
+        assert Issue.all_objects.filter(pk=issue2.pk).exists() is True  # issue d'autrui survit
+
+    def test_account_delete_reassigns_page_in_other_workspace(
+        self, workspace, create_user, configured
+    ):
+        alice = _make_user("alice@zelian.fr")
+        _member(workspace, alice)
+        ws2 = Workspace.objects.create(name="W2", owner=create_user, slug="ws2")
+        WorkspaceMember.objects.create(workspace=ws2, member=alice, role=15, is_active=True)
+        page2 = _page(ws2, alice)  # page d'alice dans un autre workspace
+
+        resp = _treat({"email": "alice@zelian.fr", "account": "delete"})
+        assert resp.data["account"] == "deleted"
+        # la page cross-workspace n'est PAS détruite par la cascade -> réattribuée (défaut #2)
+        assert Page.all_objects.filter(pk=page2.pk).exists() is True
+        page2.refresh_from_db()
+        assert page2.owned_by_id == create_user.id
+
+    def test_correct_secret_never_throttled_after_failures(self, workspace, configured):
+        # échecs d'auth répétés
+        for _ in range(3):
+            _inv("x@zelian.fr", key="wrong")
+        # un appel au BON secret passe toujours (jamais throttlé) — #5
+        resp = _inv("ghost@zelian.fr")
+        assert resp.status_code == status.HTTP_200_OK
+
+
+@pytest.mark.contract
+@pytest.mark.django_db
+class TestZelianTracesParentCascade:
+    """Self-FK parent (Issue/IssueComment/Page) sont CASCADE : ne pas détruire les enfants
+    d'autrui ni orpheliner IssueActivity (blockers de la revue adversariale)."""
+
+    def test_purge_issue_preserves_foreign_subissue_no_crash(self, workspace, configured):
+        alice = _make_user("alice@zelian.fr")
+        _member(workspace, alice)
+        bob = _make_user("bob@zelian.fr")
+        _member(workspace, bob)
+        project = _project(workspace, alice)
+        parent = _issue(workspace, project, alice)
+        with impersonate(bob):  # sous-issue d'autrui
+            sub = Issue.objects.create(
+                name="sub", project=project, workspace=workspace, parent=parent
+            )
+        _activity(workspace, project, issue=sub)  # landmine sur la sous-issue
+
+        resp = _treat({"email": "alice@zelian.fr", "account": "mask", "categories": {"issues": True}})
+        assert resp.status_code == status.HTTP_200_OK  # pas d'IntegrityError
+        assert Issue.all_objects.filter(pk=parent.pk).exists() is False  # issue d'alice purgée
+        assert Issue.all_objects.filter(pk=sub.pk).exists() is True  # sous-issue de bob préservée
+        sub.refresh_from_db()
+        assert sub.parent_id is None  # détachée
+
+    def test_purge_comment_preserves_foreign_reply_no_crash(self, workspace, configured):
+        alice = _make_user("alice@zelian.fr")
+        _member(workspace, alice)
+        bob = _make_user("bob@zelian.fr")
+        _member(workspace, bob)
+        project = _project(workspace, bob)  # issue d'autrui
+        issue = _issue(workspace, project, bob)
+        parent_c = _comment(workspace, project, issue, alice)  # commentaire d'alice
+        reply = IssueComment.objects.create(
+            workspace=workspace, project=project, issue=issue, actor=bob,
+            parent=parent_c, comment_html="<p>reply</p>",
+        )
+        _activity(workspace, project, comment=reply)  # landmine sur la réponse
+
+        resp = _treat({"email": "alice@zelian.fr", "account": "mask", "categories": {"comments": True}})
+        assert resp.status_code == status.HTTP_200_OK
+        assert IssueComment.all_objects.filter(pk=parent_c.pk).exists() is False  # commentaire d'alice purgé
+        assert IssueComment.all_objects.filter(pk=reply.pk).exists() is True  # réponse de bob préservée
+        reply.refresh_from_db()
+        assert reply.parent_id is None
+
+    def test_purge_page_preserves_foreign_subpage(self, workspace, create_user, configured):
+        alice = _make_user("alice@zelian.fr")
+        _member(workspace, alice)
+        bob = _make_user("bob@zelian.fr")
+        _member(workspace, bob)
+        parent_page = _page(workspace, alice)
+        sub_page = Page.objects.create(
+            name="sub", workspace=workspace, owned_by=bob, parent=parent_page
+        )
+
+        resp = _treat({"email": "alice@zelian.fr", "account": "mask", "categories": {"pages": True}})
+        assert resp.status_code == status.HTTP_200_OK
+        # parent_page a une sous-page d'autrui -> considérée partagée -> préservée (réattribuée)
+        assert Page.all_objects.filter(pk=parent_page.pk).exists() is True
+        assert Page.all_objects.filter(pk=sub_page.pk).exists() is True  # sous-page de bob intacte
+
+    def test_account_delete_refused_when_owns_soft_deleted_workspace(
+        self, workspace, configured
+    ):
+        alice = _make_user("alice@zelian.fr")
+        _member(workspace, alice)
+        # workspace possédé par alice, puis soft-deleted (deleted_at) mais pas encore purgé
+        owned = Workspace.objects.create(name="Owned", owner=alice, slug="owned-ws")
+        Workspace.all_objects.filter(pk=owned.pk).update(deleted_at=timezone.now())
+
+        resp = _treat({"email": "alice@zelian.fr", "account": "delete"})
+        assert resp.data["status"] == "rejected"  # all_objects couvre le soft-deleted
+        assert resp.data["reason"] == "owns_workspace"
+        assert User.objects.filter(pk=alice.pk).exists() is True
