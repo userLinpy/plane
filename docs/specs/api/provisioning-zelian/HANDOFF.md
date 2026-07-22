@@ -32,7 +32,7 @@
 
 Le module **`api/provisioning-zelian`** (Manage pilote les accès Plane par une coche « accès Plane » ;
 Plane = réplique, sens unique annuaire Zelian → Plane, jointure par **email**) est **entièrement
-implémenté et mergé dans `preview`** (`userLinpy/plane`) :
+implémenté et mergé dans `preview`** (`userLinpy/plane`) — **⚠️ côté Plane SEULEMENT (voir §1bis)** :
 
 - **US-01→05 (provisioning)** — **PR #106 MERGÉE** (merge commit `230b8f27e7`). Endpoint
   `POST /api/zelian/provisioning/`.
@@ -49,6 +49,32 @@ purge sélective-totale définitive / légation / tombstone. RM-01→14, cas 6/7
 verts ; `makemigrations --check` = zéro migration (ADR-002) ; `ruff check` clean ; copyright OK ; **CI
 verte** sur #106 et #107. **Double revue adversariale** de US-06 (12 défauts corrigés, dont 4 blockers
 « parent-cascade », voir §6).
+
+---
+
+## 1bis. ⚠️ PÉRIMÈTRE — ceci est la MOITIÉ Plane ; l'échange Manage ↔ Plane n'est PAS fonctionnel
+
+**La feature est un échange à DEUX côtés.** #106/#107 ne livrent que la **moitié Plane (réception)** :
+des endpoints server-to-server qui *attendent* d'être appelés. **Rien ne les appelle aujourd'hui** → ils
+sont **DORMANTS** ; la feature n'est **pas fonctionnelle end-to-end** tant que la **moitié Manage
+(émission)** n'existe pas. C'est **conforme à la spec** (qui scope explicitement « l'interface de Manage »
+et « le service de synchronisation » **HORS** du module Plane : Plane = réplique, Manage = pilote) — donc
+ce n'est **pas un défaut de la PR #106**, mais **un chantier Manage/Insider distinct et REQUIS**, dans le
+monorepo `2026-zelian-insider` (**PAS** le repo Plane).
+
+**Ce que Manage doit implémenter (la moitié ÉMETTRICE)** — par US :
+- **US-01 coche** : case « accès Plane » + sélecteur de rôle sur la fiche personne → Manage APPELLE
+  `POST /api/zelian/provisioning/` `{workspace_slug, members:[{email, role, action:"provision", name}]}`.
+- **US-03 décoche** : même endpoint, `action:"deactivate"`. **US-04 recoche** : `action:"provision"`.
+- **US-05 rôle** : inclure/omettre `role` selon le toggle Manage « Plane peut changer les rôles » ; lire
+  les rôles courants via l'API membres Plane (lecture seule) pour s'aligner.
+- **US-06 suppression** : à la suppression du compte annuaire → `POST /api/zelian/traces/inventory/`
+  (peuple le dialogue) puis `POST /api/zelian/traces/treatment/` (décision de l'admin : mask/delete,
+  purge par catégorie, légation).
+- **Transverse** : Manage **détient le secret** `ZELIAN_PROVISIONING_SECRET` (gestionnaire de secrets) et
+  le passe en en-tête `X-Zelian-Provisioning-Key` ; gère le déclencheur (coche / départ) et le dialogue.
+
+→ **C'est le plus gros reliquat de la feature, pas une finition.** Détails en §8.
 
 ---
 
@@ -202,15 +228,21 @@ purges projets → traitement compte. Réponse : `{ status, account, operations[
 
 ## 8. CE QUI RESTE (prochaines étapes)
 
-1. **Côté Manage** : figer le contrat API `traces` et construire le **dialogue UI** de suppression (hors
-   scope Plane).
-2. **Côté Insider** (repo `/home/lucie/dev/2026-zelian-insider`, brancher depuis `feat/auth_mire_sso`,
-   **jamais `main`**, PR obligatoire) :
-   - Écrire le **service de synchronisation** qui APPELLE `provisioning` + `traces` (secret de service).
-   - Écrire l'**ADR « intégration Plane »** (skill `zelian-adr`) et **inscrire Plane au registre
-     `05-flux §5.1`** — le doc Insider (§9) l'exigeait *avant de coder* ; c'est le seul reliquat de
-     gouvernance. Convention auth server-to-server = « secret de service, gestionnaire de secrets,
-     règle 07 » (voir [[zelian-insider-repos-et-conventions]]).
+**Repo Insider** = `/home/lucie/dev/2026-zelian-insider` — brancher depuis `feat/auth_mire_sso`,
+**jamais `main`**, PR obligatoire, pipeline Zelian (`/zelian:new-spec` → plan → exécuter).
+
+1. **⭐ LA MOITIÉ ÉMETTRICE (le plus gros morceau — voir §1bis)** — dans Manage/Insider :
+   - le **service de synchronisation** qui APPELLE `provisioning` + `traces` (détient le secret, le passe
+     en en-tête `X-Zelian-Provisioning-Key`), déclenché par la coche / le départ d'une personne ;
+   - la case « **accès Plane** » + sélecteur de rôle sur la fiche personne ;
+   - le **dialogue de suppression** peuplé par `traces/inventory`, qui envoie la décision à
+     `traces/treatment`.
+   Sans ça, les endpoints Plane restent **DORMANTS** (feature non fonctionnelle). Figer d'abord le
+   **contrat API `traces`** (§5).
+2. **Gouvernance Insider** : l'**ADR « intégration Plane »** (skill `zelian-adr`) + **inscrire Plane au
+   registre `05-flux §5.1`** — le doc Insider (§9) l'exigeait *avant de coder*. Convention auth
+   server-to-server = « secret de service, gestionnaire de secrets, règle 07 » (voir
+   [[zelian-insider-repos-et-conventions]]).
 3. **Durcissement optionnel** (non bloquant) : **secret séparé lecture (`inventory`) vs destructif
    (`treatment`/`delete`)** pour un moindre-privilège plus fin.
 4. **Déploiement** : provisionner `ZELIAN_PROVISIONING_SECRET` (≥ 256 bits) ; stack Plane isolée
@@ -224,5 +256,6 @@ purges projets → traitement compte. Réponse : `{ status, account, operations[
   `plane-bascule-interne-prive.md` (doctrine repo séparé), `plane-fork-reimplemente-features-payantes.md`,
   `zelian-insider-repos-et-conventions.md`, `zelian-insider-repo-regles.md`, `plane-repo-lives-in-wsl.md`.
 - **PRs** : #106 (US-01→05, mergée), #107 (US-06, mergée le 2026-07-22) sur `userLinpy/plane` → `preview`.
-- **Commits US-06** : `14cecbc67c` (feat), `112050493d` (docs), `695a200a01` (compass), `0b5aa96f42`
-  (durcissement post-revue).
+- **Commits (branche `feat/provisioning-zelian-v1`)** : `14cecbc67c` (feat US-06), `112050493d` (docs),
+  `695a200a01` (compass), `0b5aa96f42` (durcissement post-revue), `2e440f05ef`+ (ce handoff). **Merges** :
+  #106 = `230b8f27e7`, #107 = `46aec5e09b`.
